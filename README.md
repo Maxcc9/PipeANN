@@ -48,7 +48,10 @@ Install dependencies:
 sudo apt install make cmake g++ libaio-dev libgoogle-perftools-dev \
                  clang-format libmkl-full-dev libeigen3-dev
 
-# For Python interface
+# For Python interface. This project uses the diskann conda environment
+# for all Python commands.
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate diskann
 pip install "pybind11[global]"
 
 # Build liburing
@@ -64,7 +67,11 @@ Build PipeANN:
 bash ./build.sh
 
 # For Python users: build and install the Python interface
-pip install -e .
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate diskann
+unset DEBUG
+export CPLUS_INCLUDE_PATH="$CONDA_PREFIX/include${CPLUS_INCLUDE_PATH:+:$CPLUS_INCLUDE_PATH}"
+CMAKE_ARGS="-DCMAKE_POLICY_VERSION_MINIMUM=3.5" pip install -e .
 ```
 
 ### ⚡ C++

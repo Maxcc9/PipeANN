@@ -166,6 +166,9 @@ int search_disk_index(int argc, char **argv) {
     float mean_latency = (float) pipeann::get_mean_stats(
         stats, query_num, [](const pipeann::QueryStats &stats) { return stats.total_us; });
 
+    float latency_50 = (float) pipeann::get_percentile_stats(
+        stats, query_num, 0.50f, [](const pipeann::QueryStats &stats) { return stats.total_us; });
+
     float latency_99 = (float) pipeann::get_percentile_stats(
         stats, query_num, 0.99f, [](const pipeann::QueryStats &stats) { return stats.total_us; });
 
@@ -188,8 +191,8 @@ int search_disk_index(int argc, char **argv) {
       }
 
       std::cout << std::setw(6) << L << std::setw(12) << beamwidth << std::setw(12) << qps << std::setw(12)
-                << mean_latency << std::setw(12) << latency_99 << std::setw(12) << mean_hops << std::setw(12)
-                << mean_ios;
+                << mean_latency << std::setw(12) << latency_50 << std::setw(12) << latency_99 << std::setw(12)
+                << mean_hops << std::setw(12) << mean_ios;
       if (calc_recall_flag) {
         std::cout << std::setw(12) << recall << std::endl;
       }
@@ -209,8 +212,8 @@ int search_disk_index(int argc, char **argv) {
 
   std::string recall_string = "Recall@" + std::to_string(recall_at);
   std::cout << std::setw(6) << "L" << std::setw(12) << "I/O Width" << std::setw(12) << "QPS" << std::setw(12)
-            << "AvgLat(us)" << std::setw(12) << "P99 Lat" << std::setw(12) << "Mean Hops" << std::setw(12) << "Mean IOs"
-            << std::setw(12);
+            << "AvgLat(us)" << std::setw(12) << "P50 Lat" << std::setw(12) << "P99 Lat" << std::setw(12)
+            << "Mean Hops" << std::setw(12) << "Mean IOs" << std::setw(12);
   if (calc_recall_flag) {
     std::cout << std::setw(12) << recall_string << std::endl;
   } else

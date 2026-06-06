@@ -58,6 +58,12 @@ nav:
     - python-interface.md
   - Application Integrations:
     - application-integrations.md
+  - Developer Notes:
+    - Architecture: architecture.md
+    - Data Formats: data-formats.md
+    - Development Guide: development-guide.md
+    - Local DiskANN Data Workflow: local-diskann-data-workflow.md
+    - Build/Search Parameters: build-search-parameters.md
   - Repository Layout:
     - repository-layout.md
 
