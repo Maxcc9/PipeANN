@@ -30,3 +30,6 @@ target_link_libraries(build_disk_index_filtered ${PROJECT_NAME})
 
 add_executable(search_disk_index_filtered search_disk_index_filtered.cpp)
 target_link_libraries(search_disk_index_filtered ${PROJECT_NAME})
+
+add_executable(search_server search_server.cpp)
+target_link_libraries(search_server ${PROJECT_NAME})
