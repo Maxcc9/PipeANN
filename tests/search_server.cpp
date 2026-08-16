@@ -51,6 +51,11 @@ struct ResponseHeader {
 static_assert(sizeof(RequestHeader)  == 16, "");
 static_assert(sizeof(ResponseHeader) == 12, "");
 
+// Global SSD-read counter (4KB sectors), aggregated from QueryStats::n_ios.
+// Read/reset via control message (k==0): l==3 read, l==4 reset. Matches the
+// DiskANN/Starling servers so pareto_client.py --report_io works unchanged.
+static std::atomic<uint64_t> g_io_count{0};
+
 // ── I/O helpers ─────────────────────────────────────────────────────────────
 static bool recv_all(int fd, void *buf, size_t len) {
     auto *p = static_cast<uint8_t *>(buf);
@@ -170,7 +175,20 @@ private:
         RequestHeader req{};
         if (!recv_all(client_fd, &req, sizeof(req)))
             throw std::runtime_error("failed to read request header");
-        if (req.k == 0 || req.l == 0 || req.k > req.l)
+
+        // Control message: k==0. l carries the command (1/2 freeze/unfreeze are
+        // no-ops here; 3=read counter, 4=reset). Reply is a bare ResponseHeader
+        // with the counter value placed in the server_us field.
+        if (req.k == 0) {
+            uint64_t val = 0;
+            if (req.l == 3)      val = g_io_count.load();
+            else if (req.l == 4) g_io_count.store(0);
+            ResponseHeader ctl{req.query_id, val};
+            if (!send_all(client_fd, &ctl, sizeof(ctl)))
+                throw std::runtime_error("failed to send control reply");
+            return;
+        }
+        if (req.l == 0 || req.k > req.l)
             throw std::runtime_error("invalid request k/l");
 
         // Read query as float32 (pareto_client.py sends float32)
@@ -202,6 +220,9 @@ private:
         const auto t1 = std::chrono::steady_clock::now();
         const uint64_t server_us = static_cast<uint64_t>(
             std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count());
+
+        // Aggregate this query's SSD reads (4KB sectors) into the global counter.
+        g_io_count.fetch_add(static_cast<uint64_t>(stats.n_ios), std::memory_order_relaxed);
 
         // Response: header + k uint64 IDs + k float dists
         ResponseHeader resp_hdr{req.query_id, server_us};
