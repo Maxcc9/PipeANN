@@ -5,6 +5,7 @@
 // Usage:
 //   search_server <data_type> <index_prefix> <port> <num_threads> <pipeline_width>
 //                 [--mem_l <N>] [--mode <0|2>]
+//                 [--et_theta_exact <F>] [--et_min_iters <N>]
 //
 //   data_type      : uint8 / int8 / float
 //   index_prefix   : path prefix used when building the index
@@ -13,6 +14,14 @@
 //   pipeline_width : I/O pipeline width passed to pipe_search (recommend 32)
 //   --mem_l N      : load _mem.index and use mem_L=N for nav-graph entry (default 0)
 //   --mode  M      : 0=beam_search  2=pipe_search (default 2)
+//   --et_theta_exact F : CA-ET stopping threshold, ported from PaceANN. Stop once the
+//                    nearest UNexpanded candidate is more than F x the l_search-th
+//                    candidate's distance away. Both are approximate (PQ) distances
+//                    from the same retset, so no extra I/O is needed.
+//                    0 (default) disables it and the search is byte-for-byte the
+//                    original PipeANN behaviour.
+//   --et_min_iters N : grace period; CA-ET only applies after N loop iterations, so
+//                    queries that converge quickly are left untouched (default 0).
 
 #include <atomic>
 #include <chrono>
@@ -89,7 +98,10 @@ class PipeANNServer {
 public:
     PipeANNServer(const std::string &index_prefix, uint32_t num_threads,
                   uint64_t pipeline_width, uint32_t mem_l, int search_mode,
-                  uint64_t data_dim)
+                  uint64_t data_dim,
+                  // ⚠️ 刻意不給預設值:給了預設值時,呼叫端漏傳會靜默使用預設,
+                  //    編譯器不會報錯。實際踩過 —— 整輪 θ 掃描都在 θ=0 下跑完。
+                  float et_theta, uint32_t et_min_iters, uint32_t et_ref_rank)
         : _num_threads(num_threads), _pipeline_width(pipeline_width),
           _mem_l(mem_l), _search_mode(search_mode), _dim(data_dim)
     {
@@ -114,11 +126,17 @@ public:
             _index->load_mem_index(mem_path);
         }
 
+        // CA-ET:0 = 停用,此時 terminate() 完全不進入該段判斷,原版行為不變。
+        _index->set_ca_et(et_theta, et_min_iters, et_ref_rank);
+
         std::cout << "[PipeANN Server] index loaded, dim=" << _dim
                   << " threads=" << num_threads
                   << " pipeline_width=" << pipeline_width
                   << " mem_l=" << mem_l
-                  << " mode=" << search_mode << std::endl;
+                  << " mode=" << search_mode
+                  << " et_theta_exact=" << et_theta
+                  << " et_min_iters=" << et_min_iters
+                  << " et_ref_rank=" << et_ref_rank << std::endl;
     }
 
     void run(uint16_t port) {
@@ -270,12 +288,22 @@ int main(int argc, char **argv) {
     uint64_t    data_dim     = static_cast<uint64_t>(std::stoi(argv[6]));
     uint32_t    mem_l        = 0;
     int         search_mode  = 2;
+    // CA-ET(移植自 PaceANN)。0 = 停用,行為與原版逐字相同。
+    float       et_theta     = 0.0f;
+    uint32_t    et_min_iters = 0;
+    uint32_t    et_ref_rank  = 10;   // = K;見 ssd_index.h 為何不能用 l_search
 
     for (int i = 7; i < argc; ++i) {
         if (std::string(argv[i]) == "--mem_l" && i + 1 < argc)
             mem_l = static_cast<uint32_t>(std::stoi(argv[++i]));
         else if (std::string(argv[i]) == "--mode" && i + 1 < argc)
             search_mode = std::stoi(argv[++i]);
+        else if (std::string(argv[i]) == "--et_theta_exact" && i + 1 < argc)
+            et_theta = std::stof(argv[++i]);
+        else if (std::string(argv[i]) == "--et_min_iters" && i + 1 < argc)
+            et_min_iters = static_cast<uint32_t>(std::stoi(argv[++i]));
+        else if (std::string(argv[i]) == "--et_ref_rank" && i + 1 < argc)
+            et_ref_rank = static_cast<uint32_t>(std::stoi(argv[++i]));
     }
 
     omp_set_num_threads(static_cast<int>(num_threads));
@@ -283,15 +311,15 @@ int main(int argc, char **argv) {
     try {
         if (data_type == "uint8") {
             PipeANNServer<uint8_t> srv(index_prefix, num_threads, pipe_width,
-                                       mem_l, search_mode, data_dim);
+                                       mem_l, search_mode, data_dim, et_theta, et_min_iters, et_ref_rank);
             srv.run(port);
         } else if (data_type == "int8") {
             PipeANNServer<int8_t> srv(index_prefix, num_threads, pipe_width,
-                                      mem_l, search_mode, data_dim);
+                                      mem_l, search_mode, data_dim, et_theta, et_min_iters, et_ref_rank);
             srv.run(port);
         } else if (data_type == "float") {
             PipeANNServer<float> srv(index_prefix, num_threads, pipe_width,
-                                     mem_l, search_mode, data_dim);
+                                     mem_l, search_mode, data_dim, et_theta, et_min_iters, et_ref_rank);
             srv.run(port);
         } else {
             std::cerr << "Unknown data_type: " << data_type << "\n";

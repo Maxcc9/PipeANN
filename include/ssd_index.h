@@ -216,6 +216,29 @@ namespace pipeann {
     // again (e.g. after copy_index in the double-version path) must re-acquire.
     std::shared_mutex merge_lock;
 
+    // ── CA-ET(Convergence-Aware Early Termination,移植自 PaceANN)──────────
+    // 停止規則:當「最近的**未展開**候選」的距離 > theta × 「第 l_search 名候選」
+    // 的距離時,再展開下去不會改善結果,提前停止。兩邊都是 retset 裡的近似(PQ)
+    // 距離,同尺度比較,不需要額外 I/O 也不讀任何新資料。
+    //
+    // 預設 0.0f = 停用。停用時 terminate() 完全不進入這段判斷,原版行為逐字不變。
+    // min_iters 是寬限期:讓多數查詢在收斂前不受規則影響,只有長尾查詢會被截斷。
+    // ref_rank:比較的參考排名,語意上等同 PaceANN/Starling 規則裡的 k_search
+    // (要求的結果數,通常 10)。⚠️ 不可用 l_search:pipe_search_common 的停止
+    // 條件本來就是「前 l_search 名全部展開」,所以「最近的未展開候選」必然落在
+    // 前 l_search 名之內,拿它跟第 l_search 名比,條件恆為假、規則完全不會觸發。
+    // (實測踩過:θ 從 1.05 掃到 1.30,mean_io 變化全部 ≤0.3%。)
+    // k_search 沒有傳進搜尋迴圈(只在事後的 copy_top_k 用到),所以做成可設定的
+    // 成員,與 DiskANN fork 的 et_ref_rank 同一套設計。
+    void set_ca_et(float theta, uint32_t min_iters, uint32_t ref_rank) {
+      et_theta_ = theta;
+      et_min_iters_ = min_iters;
+      if (ref_rank > 0) et_ref_rank_ = ref_rank;
+    }
+    float et_theta_ = 0.0f;
+    uint32_t et_min_iters_ = 0;
+    uint32_t et_ref_rank_ = 10;
+
    private:
     // Background insert I/O commit.
     struct BgTask {

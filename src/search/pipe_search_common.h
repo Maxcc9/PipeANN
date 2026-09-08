@@ -283,6 +283,7 @@ namespace pipeann {
     // (disabled) so non-range callers keep original behavior.
     constexpr float kRangeEarlyStopFactor = 2.0f;
     const float approx_range_partial = range_partial * kRangeEarlyStopFactor;
+    uint64_t et_iters = 0;
     auto terminate = [&]() -> bool {
       int ret = -1;
       uint64_t is_member_cnt = 0;
@@ -298,7 +299,30 @@ namespace pipeann {
           break;
         }
       }
-      return is_member_cnt >= l_search || ret == -1 || range_crossed;
+      if (is_member_cnt >= l_search || ret == -1 || range_crossed) {
+        return true;
+      }
+
+      // ── CA-ET:收斂感知的提前停止(移植自 PaceANN 的同尺度規則)────────
+      // retset 依距離排序,所以上面迴圈找到的 ret 就是「最近的未展開候選」。
+      // 拿它和第 et_ref_rank_ 名比:若已經遠出 theta 倍,再展開不會改善結果。
+      // 兩邊都是 retset 內的近似(PQ)距離,同尺度、零額外 I/O。
+      //
+      // ⚠️ 參考排名必須是 k_search 尺度(預設 10),**不能用 l_search**:上面的
+      // 停止條件本來就是「前 l_search 名全部展開」,所以 ret < l_search 恆成立,
+      // 而 retset 遞增排序 ⇒ retset[ret] <= retset[l_search-1],條件永遠為假。
+      //
+      // et_theta_ == 0 時整段不執行,原版行為逐字不變。
+      ++et_iters;
+      const unsigned et_ref = this->et_ref_rank_;
+      if (this->et_theta_ > 0.0f && et_iters > this->et_min_iters_ && ret >= 0 &&
+          cur_list_size >= et_ref && (unsigned) ret >= et_ref) {
+        const float ref = retset[et_ref - 1].distance;
+        if (ref > 1e-9f && retset[ret].distance > this->et_theta_ * ref) {
+          return true;
+        }
+      }
+      return false;
     };
 
     // --- Main search loop ---
