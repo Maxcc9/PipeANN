@@ -373,6 +373,9 @@ namespace pipeann {
     if (stats != nullptr) {
       stats->cpu_us2 = std::chrono::duration_cast<std::chrono::microseconds>(cpu2_ed - cpu2_st).count();
       stats->cpu_us = n_computes;
+      // et_iters 計的是 terminate() 的呼叫次數,等同主迴圈的輪數。
+      stats->n_hops = (double) et_iters;
+      stats->beam_final = (double) cur_beam_width;
     }
 
     std::sort(full_retset.begin(), full_retset.end(),

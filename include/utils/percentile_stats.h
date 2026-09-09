@@ -18,6 +18,11 @@ namespace pipeann {
     double cpu_us2 = 0;         // total time spent in CPU
     double n_cmps = 0;          // # cmps
     double n_hops = 0;          // # search hops
+    // 診斷用:查詢結束時的 cur_beam_width。pipe_search 依 I/O 完成情況自適應調整
+    // 它,而該調整依賴「完成的 I/O 距離 <= retset 末端距離」的比例 —— 當重複讀取
+    // 被 OS page cache 服務、I/O 提早完成時,分類結果會改變。用來檢驗「傾斜工作
+    // 負載下 PipeANN 的 recall 反向下降」的機制假設。
+    double beam_final = 0;
     double n_current_used = 0;  // # force return for latency limit
     double n_filter[N_FILTER_TYPES] = {0};
     double n_est_filter_reads[N_FILTER_TYPES] = {0};

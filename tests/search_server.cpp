@@ -64,6 +64,11 @@ static_assert(sizeof(ResponseHeader) == 12, "");
 // Read/reset via control message (k==0): l==3 read, l==4 reset. Matches the
 // DiskANN/Starling servers so pareto_client.py --report_io works unchanged.
 static std::atomic<uint64_t> g_io_count{0};
+// 診斷用聚合(l=7/8/9 讀取,l=4 一併歸零)。存 ×1000 的定點數,因為控制通道
+// 只回傳 uint64;呼叫端除以 1000 還原。
+static std::atomic<uint64_t> g_hops_x1k{0};
+static std::atomic<uint64_t> g_beam_x1k{0};
+static std::atomic<uint64_t> g_queries{0};
 
 // ── I/O helpers ─────────────────────────────────────────────────────────────
 static bool recv_all(int fd, void *buf, size_t len) {
@@ -200,7 +205,11 @@ private:
         if (req.k == 0) {
             uint64_t val = 0;
             if (req.l == 3)      val = g_io_count.load();
-            else if (req.l == 4) g_io_count.store(0);
+            else if (req.l == 4) { g_io_count.store(0); g_hops_x1k.store(0);
+                                   g_beam_x1k.store(0); g_queries.store(0); }
+            else if (req.l == 7) val = g_hops_x1k.load();   // Σ hops ×1000
+            else if (req.l == 8) val = g_beam_x1k.load();   // Σ final beam ×1000
+            else if (req.l == 9) val = g_queries.load();
             ResponseHeader ctl{req.query_id, val};
             if (!send_all(client_fd, &ctl, sizeof(ctl)))
                 throw std::runtime_error("failed to send control reply");
@@ -241,6 +250,9 @@ private:
 
         // Aggregate this query's SSD reads (4KB sectors) into the global counter.
         g_io_count.fetch_add(static_cast<uint64_t>(stats.n_ios), std::memory_order_relaxed);
+        g_hops_x1k.fetch_add(static_cast<uint64_t>(stats.n_hops * 1000), std::memory_order_relaxed);
+        g_beam_x1k.fetch_add(static_cast<uint64_t>(stats.beam_final * 1000), std::memory_order_relaxed);
+        g_queries.fetch_add(1, std::memory_order_relaxed);
 
         // Response: header + k uint64 IDs + k float dists
         ResponseHeader resp_hdr{req.query_id, server_us};
