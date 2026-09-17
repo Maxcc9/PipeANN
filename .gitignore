@@ -1,4 +1,5 @@
 build/
+build_uring/
 .vscode/
 indices/
 .cache/
